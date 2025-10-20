@@ -4,14 +4,13 @@ local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/rel
 WindUI:AddTheme({
     Name = "E-vil Royal",
     Accent = WindUI:Gradient({
-        ["0"] = { Color = Color3.fromHex("#574094"), Transparency = 0 },
-        ["100"] = { Color = Color3.fromHex("#8b5cf6"), Transparency = 0 },
+        ["0"] = { Color = Color3.fromHex("#1e055a"), Transparency = 0 },
+        ["100"] = { Color = Color3.fromHex("#140a1e"), Transparency = 0 },
     }, { Rotation = 45 }),
     Dialog = Color3.fromHex("#1a1a1d"),
     Outline = Color3.fromHex("#FFD700"),
     Text = Color3.fromHex("#FFFFFF"),
     Placeholder = Color3.fromHex("#c0a763"),
-    Background = Color3.fromHex("#140a1e"),
     Button = Color3.fromHex("#292133"),
     Icon = Color3.fromHex("#FFD700")
 })
@@ -62,7 +61,9 @@ Window:DisableTopbarButtons({"Fullscreen"})
 
 -- Add a version tag above the tab
 Window:Tag({
-    Title = "v1.0.0",
-    Color = Color3.fromHex("#FFD700"),  -- muted purple for subtlety
-    Radius = 15,
+    Title = "v2.0.1",
+    Color = Color3.fromHex("#FFD700"),
+    Radius = 13,
 })
+
+Window:Divider()

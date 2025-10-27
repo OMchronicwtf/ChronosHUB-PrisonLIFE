@@ -1,0 +1,279 @@
+-- Keep your loader
+loadstring(game:HttpGet("https://github.com/OMchronicwtf/ChronosHUB-PrisonLIFE/raw/refs/heads/main/ChronosHUB%20Load"))()
+
+-- Create Main Tab
+local MainTab = Window:Tab({
+    Title = "Main Tab",
+    Icon = "lucide:house",
+    Locked = false,
+})
+
+local WeaponsSection = MainTab:Section({
+    Title = "Weapons",
+    Icon = "swords",
+    Box = true,
+    Opened = true,
+})
+
+----------------------------------------------------------
+-- Auto Grab Guns Toggle
+----------------------------------------------------------
+local autoGrabEnabled = false
+local connection
+local autoGrabInitialized = false
+
+local targetWeapons = {"AK-47", "Remington 870", "M9"}
+
+local function collectWeapons()
+    local player = game:GetService("Players").LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+    local function hasAllWeapons()
+        local backpack = player.Backpack
+        return backpack:FindFirstChild("AK-47") and backpack:FindFirstChild("Remington 870") and backpack:FindFirstChild("M9")
+    end
+
+    local function collectWeaponsSequentially()
+        for _, weaponName in pairs(targetWeapons) do
+            for _, child in pairs(workspace:GetChildren()) do
+                if child:IsA("Model") and child:FindFirstChild("TouchGiver") and child:GetAttribute("ToolName") == weaponName then
+                    local touchGiver = child.TouchGiver
+                    local touchInterest = touchGiver:FindFirstChild("TouchInterest")
+                    if touchInterest then
+                        firetouchinterest(humanoidRootPart, touchInterest.Parent, 1)
+                        task.wait(0.25)
+                        firetouchinterest(humanoidRootPart, touchInterest.Parent, 0)
+                    end
+                end
+            end
+        end
+    end
+
+    local maxAttempts = 5000000
+    for attempt = 1, maxAttempts do
+        collectWeaponsSequentially()
+        if hasAllWeapons() then break end
+    end
+end
+
+local AutoGrabToggle = WeaponsSection:Toggle({
+    Title = "Auto-Grab Guns",
+    Desc = "Automatically collects guns immediately & upon spawn.",
+    Icon = "lucide:circle-check",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        if not autoGrabInitialized then
+            autoGrabInitialized = true
+            return
+        end
+
+        autoGrabEnabled = state
+        if state then
+            WindUI:Notify({
+                Title = "Auto-Grab Guns",
+                Content = "Enabled",
+                Duration = 2,
+                Icon = "lucide:hand-grab",
+            }, true)
+
+            collectWeapons()
+            local player = game:GetService("Players").LocalPlayer
+            connection = player.CharacterAdded:Connect(function()
+                if autoGrabEnabled then
+                    task.wait(1.5)
+                    collectWeapons()
+                end
+            end)
+
+        else
+            WindUI:Notify({
+                Title = "Auto-Grab Guns",
+                Content = "Disabled",
+                Duration = 2,
+                Icon = "lucide:circle-x",
+            }, true)
+
+            if connection then
+                connection:Disconnect()
+                connection = nil
+            end
+        end
+    end
+})
+
+----------------------------------------------------------
+-- Manual Collect Guns Button (UNDER AUTO-GRAB)
+----------------------------------------------------------
+local GiveWeaponsButton = WeaponsSection:Button({
+    Title = "Self-Grab Guns",
+    Justify = "Center",
+    IconAlign = "right",
+    Icon = "hand-grab",
+    Locked = false,
+    Callback = function()
+        WindUI:Notify({
+            Title = "Self-Grab Guns",
+            Content = "Collecting...",
+            Duration = 2,
+            Icon = "lucide:hand",
+        }, true)
+
+        collectWeapons()
+
+        WindUI:Notify({
+            Title = "Self-Grab Guns",
+            Content = "Guns collected successfully!",
+            Duration = 2,
+            Icon = "lucide:hand-grab",
+        }, true)
+    end
+})
+
+----------------------------------------------------------
+-- Divider
+----------------------------------------------------------
+WeaponsSection:Divider()
+
+----------------------------------------------------------
+-- RAPID FIRE BUTTON → DIALOG CONFIRMATION (FIXED LINE 179)
+----------------------------------------------------------
+local RapidFireButton = WeaponsSection:Button({
+    Title = "Rapid Fire & Infinite Range",
+    Icon = "lucide:zap",
+    Justify = "Center",
+    IconAlign = "right",
+    Locked = false,
+    Callback = function()
+        -- SHOW DIALOG
+        local Dialog = Window:Dialog({
+            Title = "Heads Up!",
+            Icon = "lucide:message-circle-warning",
+            Content = "Enabling this will permanently modify your weapon attributes for the rest of this session. To disable, you must rejoin the game. Additionally, this only works on high UNC executors.\n\nAre you sure you want to continue?",
+            Buttons = {
+                {
+                    Title = "Cancel",
+                    Variant = "Tertiary",
+                    Callback = function()
+                        -- Do nothing
+                    end,
+                },
+                {
+                    Title = "Confirm",
+                    Variant = "Primary",
+                    Icon = "",
+                    Callback = function()
+                        -- NOTIFY + RUN HOOK
+                        WindUI:Notify({
+                            Title = "Rapid Fire",
+                            Content = "Enabled (Rejoin to disable)",
+                            Duration = 4,
+                            Icon = "lucide:zap",
+                        }, true)
+
+                        local namecall
+                        namecall = hookmetamethod(game, "__namecall", function(self, ...)
+                            local method = getnamecallmethod()
+                            if method == "GetAttributes" then
+                                local result = namecall(self, ...)
+                                result.AutoFire = true
+                                result.FireRate = 0.05
+                                result.Range = 999999999
+                                result.Spread = 5
+                                return result
+                            end
+                            return namecall(self, ...)
+                        end)
+                    end,
+                },
+            },
+        })
+
+        Dialog:Show()
+    end
+})
+
+local PlayerSection = MainTab:Section({
+    Title = "Player",
+    Icon = "user",
+    Box = true,
+    Opened = true,
+})
+
+----------------------------------------------------------
+-- Infinite Stamina Toggle
+----------------------------------------------------------
+local infiniteStaminaEnabled = false
+local staminaConnection
+local staminaInitialized = false
+
+local InfiniteStaminaToggle = PlayerSection:Toggle({
+    Title = "Infinite Stamina",
+    Desc = "Disabling Infinite Stamina requires respawning.",
+    Icon = "lucide:circle-check",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        if not staminaInitialized then
+            staminaInitialized = true
+            return
+        end
+
+        infiniteStaminaEnabled = state
+        local LocalPlayer = game:GetService("Players").LocalPlayer
+
+        local function DisconnectStamina(Humanoid)
+            task.wait(1)
+            local JumpConns = getconnections(Humanoid.Jumping)
+            for _, conn in ipairs(JumpConns) do
+                conn:Disconnect()
+            end
+        end
+
+        local function HandleChar(Character)
+            local Humanoid = Character:WaitForChild("Humanoid", 10)
+            if Humanoid then
+                DisconnectStamina(Humanoid)
+                print("Infinite Stamina Active. (tomato.txt)")
+            end
+        end
+
+        if state then
+            WindUI:Notify({
+                Title = "Infinite Stamina",
+                Content = "Enabled",
+                Duration = 2,
+                Icon = "lucide:zap",
+            }, true)
+
+            local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+            HandleChar(Character)
+
+            staminaConnection = LocalPlayer.CharacterAdded:Connect(function(Char)
+                if infiniteStaminaEnabled then
+                    HandleChar(Char)
+                end
+            end)
+
+        else
+            WindUI:Notify({
+                Title = "Infinite Stamina",
+                Content = "Disabled",
+                Duration = 2,
+                Icon = "lucide:zap-off",
+            }, true)
+
+            if staminaConnection then
+                staminaConnection:Disconnect()
+                staminaConnection = nil
+            end
+
+            local Character = LocalPlayer.Character
+            if Character then
+                Character:BreakJoints()
+                task.wait(1.5)
+            end
+        end
+    end
+})

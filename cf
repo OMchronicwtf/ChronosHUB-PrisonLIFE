@@ -1,5 +1,79 @@
--- Keep your loader
-loadstring(game:HttpGet("https://github.com/OMchronicwtf/ChronosHUB-PrisonLIFE/raw/refs/heads/main/ChronosHUB%20Load"))()
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+-- Custom Theme
+WindUI:AddTheme({
+    Name = "E-vil Royal",
+    Accent = WindUI:Gradient({
+        ["0"] = { Color = Color3.fromHex("#360273"), Transparency = 0 },
+        ["100"] = { Color = Color3.fromHex("#042444"), Transparency = 0 },
+    }, { Rotation = 45 }),
+    Background = WindUI:Gradient({
+        ["0"] = { Color = Color3.fromHex("#360273"), Transparency = 0 },
+        ["100"] = { Color = Color3.fromHex("#042444"), Transparency = 0 },
+    }, { Rotation = 45 }), -- Added to ensure gradient applies to window background
+    Dialog = Color3.fromHex("#1a1a1d"),
+    Outline = Color3.fromHex("#FFD700"),
+    Text = Color3.fromHex("#FFFFFF"),
+    Placeholder = Color3.fromHex("#c0a763"),
+    Button = Color3.fromHex("#292133"),
+    Icon = Color3.fromHex("#FFD700")
+})
+WindUI:SetTheme("E-vil Royal")
+
+-- Main Window
+local Window = WindUI:CreateWindow({
+    Title = "ChronosHUB",
+    Icon = "moon-star",
+    Author = "by @wtfchronic",
+    Folder = "ChronosHUB",
+    Size = UDim2.fromOffset(580, 460),
+    MinSize = Vector2.new(560, 350),
+    MaxSize = Vector2.new(850, 560),
+    Transparent = true,
+    Theme = "E-vil Royal",
+    Resizable = true,
+    SideBarWidth = 200,
+    BackgroundImageTransparency = 0.3,
+    HideSearchBar = false,
+    ScrollBarEnabled = true,
+    User = {
+        Enabled = true,
+        Anonymous = false,
+        Callback = function()
+            print("User button clicked")
+        end,
+    },
+})
+
+-- Edit OpenButton
+Window:EditOpenButton({
+    Title = "ChronosHUB",
+    Icon = "moon",
+    CornerRadius = UDim.new(0,16),
+    StrokeThickness = 2,
+    Color = ColorSequence.new(
+        Color3.fromHex("#574094"),
+        Color3.fromHex("#FFD700")
+    ),
+    OnlyMobile = false,
+    Enabled = true,
+    Draggable = true,
+})
+
+-- Disable Fullscreen Button
+Window:DisableTopbarButtons({"Fullscreen"})
+
+-- Add a version tag above the tab
+Window:Tag({
+    Title = "v1.0.1",
+    Color = Color3.fromHex("#FFD700"),
+    Radius = 13,
+})
+
+--[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]--
+--[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]--
+--[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]--
+--[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]--
 
 -- Create Main Tab
 local MainTab = Window:Tab({
@@ -42,7 +116,7 @@ local function collectWeapons()
                     local touchInterest = touchGiver:FindFirstChild("TouchInterest")
                     if touchInterest then
                         firetouchinterest(humanoidRootPart, touchInterest.Parent, 1)
-                        task.wait(0.25)
+                        task.wait(0.45)
                         firetouchinterest(humanoidRootPart, touchInterest.Parent, 0)
                     end
                 end
@@ -50,7 +124,7 @@ local function collectWeapons()
         end
     end
 
-    local maxAttempts = 5000000
+    local maxAttempts = 99999
     for attempt = 1, maxAttempts do
         collectWeaponsSequentially()
         if hasAllWeapons() then break end
@@ -134,63 +208,129 @@ local GiveWeaponsButton = WeaponsSection:Button({
 ----------------------------------------------------------
 -- Divider
 ----------------------------------------------------------
+
 WeaponsSection:Divider()
 
 ----------------------------------------------------------
--- RAPID FIRE BUTTON → DIALOG CONFIRMATION (FIXED LINE 179)
+-- RAPID FIRE + INFINITE RANGE (Two Toggles, One Hook)
 ----------------------------------------------------------
-local RapidFireButton = WeaponsSection:Button({
-    Title = "Rapid Fire & Infinite Range",
-    Icon = "lucide:zap",
-    Justify = "Center",
-    IconAlign = "right",
-    Locked = false,
-    Callback = function()
-        -- SHOW DIALOG
-        local Dialog = Window:Dialog({
-            Title = "Heads Up!",
-            Icon = "lucide:message-circle-warning",
-            Content = "Enabling this will permanently modify your weapon attributes for the rest of this session. To disable, you must rejoin the game. Additionally, this only works on high UNC executors.\n\nAre you sure you want to continue?",
-            Buttons = {
-                {
-                    Title = "Cancel",
-                    Variant = "Tertiary",
-                    Callback = function()
-                        -- Do nothing
-                    end,
-                },
-                {
-                    Title = "Confirm",
-                    Variant = "Primary",
-                    Icon = "",
-                    Callback = function()
-                        -- NOTIFY + RUN HOOK
-                        WindUI:Notify({
-                            Title = "Rapid Fire",
-                            Content = "Enabled (Rejoin to disable)",
-                            Duration = 4,
-                            Icon = "lucide:zap",
-                        }, true)
+local rapidFireEnabled = false
+local infiniteRangeEnabled = false
+local hookInitialized = false
+local hookSetup = false
+local originalNamecall
+local rapidFireInitialized = false
+local infiniteRangeInitialized = false
 
-                        local namecall
-                        namecall = hookmetamethod(game, "__namecall", function(self, ...)
-                            local method = getnamecallmethod()
-                            if method == "GetAttributes" then
-                                local result = namecall(self, ...)
-                                result.AutoFire = true
-                                result.FireRate = 0.05
-                                result.Range = 999999999
-                                result.Spread = 5
-                                return result
-                            end
-                            return namecall(self, ...)
-                        end)
-                    end,
-                },
-            },
-        })
+-- Shared hook setup (runs once)
+local function setupAttributeHook()
+    if hookSetup then return end
+    hookSetup = true
 
-        Dialog:Show()
+    originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+
+        if not checkcaller() and method == "GetAttributes" then
+            local result = originalNamecall(self, ...)
+            if typeof(result) == "table" then
+                -- Apply Rapid Fire
+                if rapidFireEnabled then
+                    result.AutoFire = true
+                    result.FireRate = 0.05
+                end
+
+                -- Apply Infinite Range
+                if infiniteRangeEnabled then
+                    result.Range = 999999999
+                    result.Spread = 4.5
+                end
+            end
+            return result
+        end
+
+        return originalNamecall(self, ...)
+    end)
+end
+
+----------------------------------------------------------
+-- RAPID FIRE TOGGLE
+----------------------------------------------------------
+local RapidFireToggle = WeaponsSection:Toggle({
+    Title = "Rapid Fire",
+    Desc = "Increases your firerate & enables autofire.",
+    Icon = "lucide:circle-check",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        -- prevent trigger on UI creation
+        if not rapidFireInitialized then
+            rapidFireInitialized = true
+            return
+        end
+
+        if not hookInitialized then
+            hookInitialized = true
+            setupAttributeHook()
+        end
+
+        rapidFireEnabled = state
+
+        if state then
+            WindUI:Notify({
+                Title = "Rapid Fire",
+                Content = "Enabled (Re-equip weapon)",
+                Duration = 2,
+                Icon = "lucide:rabbit",
+            }, true)
+        else
+            WindUI:Notify({
+                Title = "Rapid Fire",
+                Content = "Disabled (Re-equip weapon)",
+                Duration = 2,
+                Icon = "lucide:circle-x",
+            }, true)
+        end
+    end
+})
+
+----------------------------------------------------------
+-- INFINITE RANGE TOGGLE
+----------------------------------------------------------
+local InfiniteRangeToggle = WeaponsSection:Toggle({
+    Title = "Infinite Range",
+    Desc = "Increases the weapon range & tweaks spread.",
+    Icon = "lucide:circle-check",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        -- prevent trigger on UI creation
+        if not infiniteRangeInitialized then
+            infiniteRangeInitialized = true
+            return
+        end
+
+        if not hookInitialized then
+            hookInitialized = true
+            setupAttributeHook()
+        end
+
+        infiniteRangeEnabled = state
+
+        if state then
+            WindUI:Notify({
+                Title = "Infinite Range",
+                Content = "Enabled (Re-equip weapon)",
+                Duration = 2,
+                Icon = "lucide:land-plot",
+            }, true)
+        else
+            WindUI:Notify({
+                Title = "Infinite Range",
+                Content = "Disabled (Re-equip weapon)",
+                Duration = 2,
+                Icon = "lucide:circle-x",
+            }, true)
+        end
     end
 })
 
@@ -210,7 +350,7 @@ local staminaInitialized = false
 
 local InfiniteStaminaToggle = PlayerSection:Toggle({
     Title = "Infinite Stamina",
-    Desc = "Disabling Infinite Stamina requires respawning.",
+    Desc = "Disabling will reset character.",
     Icon = "lucide:circle-check",
     Type = "Checkbox",
     Default = false,
@@ -235,7 +375,6 @@ local InfiniteStaminaToggle = PlayerSection:Toggle({
             local Humanoid = Character:WaitForChild("Humanoid", 10)
             if Humanoid then
                 DisconnectStamina(Humanoid)
-                print("Infinite Stamina Active. (tomato.txt)")
             end
         end
 
@@ -275,5 +414,650 @@ local InfiniteStaminaToggle = PlayerSection:Toggle({
                 task.wait(1.5)
             end
         end
+    end
+})
+
+--====================================================================--
+-- NEW: Noclip Toggle (exact same structure as the others)
+--====================================================================--
+local noclipEnabled = false
+local noclipConnection = nil
+local noclipInitialized = false
+local RunService = game:GetService("RunService")
+local floatName = "HumanoidRootPart"   -- change if your game uses a different name
+
+local function enableNoclipForChar(char)
+    if not char then return end
+    local function noclipLoop()
+        if noclipEnabled and char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide and part.Name ~= floatName then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+    noclipConnection = RunService.Stepped:Connect(noclipLoop)
+end
+
+local function disableNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+    -- restore collision on current character
+    local plr = game:GetService("Players").LocalPlayer
+    local char = plr.Character
+    if char then
+        for _, part in pairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= floatName then
+                part.CanCollide = true
+            end
+        end
+    end
+end
+
+local NoclipToggle = PlayerSection:Toggle({
+    Title = "Noclip",
+    Desc = "Pass through walls.",
+    Icon = "lucide:circle-check",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        if not noclipInitialized then
+            noclipInitialized = true
+            return
+        end
+
+        noclipEnabled = state
+
+        if state then
+            WindUI:Notify({
+                Title = "Noclip",
+                Content = "Enabled",
+                Duration = 2,
+                Icon = "lucide:ghost",
+            }, true)
+
+            local plr = game:GetService("Players").LocalPlayer
+            local char = plr.Character or plr.CharacterAdded:Wait()
+            enableNoclipForChar(char)
+
+            -- reconnect on respawn
+            plr.CharacterAdded:Connect(function(newChar)
+                if noclipEnabled then
+                    task.wait(0.1)   -- tiny delay for parts to load
+                    enableNoclipForChar(newChar)
+                end
+            end)
+
+        else
+            WindUI:Notify({
+                Title = "Noclip",
+                Content = "Disabled",
+                Duration = 2,
+                Icon = "lucide:circle-x",
+            }, true)
+
+            disableNoclip()
+        end
+    end
+})
+
+--====================================================================--
+-- ESP TAB – master toggle + dropdown + TEAM‑COLOUR ESP (FIXED TeamColor)
+--====================================================================--
+
+local ESPTab = Window:Tab({
+    Title = "ESP",
+    Icon = "lucide:eye",
+    Locked = false,
+})
+
+local ESPSection = ESPTab:Section({
+    Title = "ESP",
+    Icon = "users",
+    Box = true,
+    Opened = true,
+})
+
+-----------------------------------------------------------------
+-- ESP STATE + INITIALISATION FLAGS
+-----------------------------------------------------------------
+local espEnabled = false
+local espFeatures = {
+    Boxes       = true,
+    Names       = true,
+    HealthBars  = true,
+    Tracers     = false,
+    Teammates   = false,
+    Rainbow     = false,
+}
+
+local espMasterInitialized = false
+local espDropdownInitialized = false
+local espNeedsFirstRefresh = true
+
+-----------------------------------------------------------------
+-- SERVICES & STORAGE
+-----------------------------------------------------------------
+local Players   = game:GetService("Players")
+local RunSrv    = game:GetService("RunService")
+local Camera    = workspace.CurrentCamera
+local LocalPlr  = Players.LocalPlayer
+local ESPObjs   = {}
+
+-----------------------------------------------------------------
+-- HEALTH GRADIENT
+-----------------------------------------------------------------
+local function HealthLerp(ratio)
+    return Color3.fromRGB(math.floor(255 * (1 - ratio)), math.floor(255 * ratio), 0)
+end
+
+-----------------------------------------------------------------
+-- GET PLAYER TEAM COLOUR (FIXED: plr.TeamColor.Color)
+-----------------------------------------------------------------
+local function GetTeamColour(plr)
+    if plr.TeamColor then
+        return plr.TeamColor.Color
+    end
+    return Color3.fromRGB(255,255,255) -- fallback white
+end
+
+-----------------------------------------------------------------
+-- CREATE ESP FOR ONE PLAYER
+-----------------------------------------------------------------
+local function CreateESP(plr)
+    if ESPObjs[plr] or plr == LocalPlr then return end
+
+    local boxOut = Drawing.new("Square"); boxOut.Thickness = 3; boxOut.Filled = false; boxOut.Color = Color3.new()
+    local boxIn  = Drawing.new("Square"); boxIn.Thickness  = 1; boxIn.Filled  = false
+    local name   = Drawing.new("Text");   name.Size = 16; name.Center = true; name.Outline = true; name.Color = Color3.fromRGB(255,255,255)
+    local hbMain = Drawing.new("Square"); hbMain.Filled = true
+    local hbOut  = Drawing.new("Square"); hbOut.Thickness = 2; hbOut.Filled = false; hbOut.Color = Color3.new()
+    local tracer = Drawing.new("Line");   tracer.Thickness = 1
+
+    local drawings = {boxOut, boxIn, name, hbMain, hbOut, tracer}
+    local conn
+
+    local function Update()
+        if not espEnabled or not plr.Character then
+            for _,d in ipairs(drawings) do d.Visible = false end; return
+        end
+
+        local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+        local head = plr.Character:FindFirstChild("Head")
+        local hum = plr.Character:FindFirstChild("Humanoid")
+        if not (hrp and head and hum) then
+            for _,d in ipairs(drawings) do d.Visible = false end; return
+        end
+
+        local rootPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+        local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0,0.5,0))
+
+        local teammate = LocalPlr.Team and plr.Team and LocalPlr.Team == plr.Team
+        if teammate and not espFeatures.Teammates then
+            for _,d in ipairs(drawings) do d.Visible = false end; return
+        end
+
+        local teamCol = GetTeamColour(plr)
+        local rainbowHue = espFeatures.Rainbow and ((tick()%5)/5) or nil
+        local finalCol = rainbowHue and Color3.fromHSV(rainbowHue,1,1) or teamCol
+
+        if onScreen then
+            local height = math.abs(headPos.Y - rootPos.Y)
+            local width  = height / 2
+
+            -- BOXES
+            if espFeatures.Boxes then
+                boxOut.Size = Vector2.new(width, height)
+                boxOut.Position = Vector2.new(rootPos.X - width/2, rootPos.Y - height/2)
+                boxOut.Color = rainbowHue and Color3.fromHSV(rainbowHue,1,1) or Color3.new()
+                boxOut.Visible = true
+
+                boxIn.Size = Vector2.new(width, height)
+                boxIn.Position = boxOut.Position
+                boxIn.Color = finalCol
+                boxIn.Visible = true
+            else
+                boxOut.Visible = false; boxIn.Visible = false
+            end
+
+            -- NAME
+            if espFeatures.Names then
+                name.Text = plr.DisplayName .. " ["..math.floor(hum.Health).."/"..hum.MaxHealth.."]"
+                name.Position = Vector2.new(rootPos.X, rootPos.Y - height/2 - 20)
+                name.Visible = true
+            else
+                name.Visible = false
+            end
+
+            -- HEALTH BAR
+            if espFeatures.HealthBars then
+                local barW, barH = 5, height
+                local ratio = hum.Health / hum.MaxHealth
+
+                hbOut.Size = Vector2.new(barW, barH)
+                hbOut.Position = Vector2.new(rootPos.X - width/2 - barW - 2, rootPos.Y - height/2)
+                hbOut.Visible = true
+
+                hbMain.Size = Vector2.new(barW, barH * ratio)
+                hbMain.Position = Vector2.new(hbOut.Position.X, hbOut.Position.Y + barH*(1-ratio))
+                hbMain.Color = HealthLerp(ratio)
+                hbMain.Visible = true
+            else
+                hbMain.Visible = false; hbOut.Visible = false
+            end
+
+            -- TRACER
+            if espFeatures.Tracers then
+                tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
+                tracer.To   = Vector2.new(rootPos.X, rootPos.Y)
+                tracer.Color = rainbowHue and Color3.fromHSV(rainbowHue,1,1)
+                               or (teammate and Color3.fromRGB(0,255,0) or finalCol)
+                tracer.Visible = true
+            else
+                tracer.Visible = false
+            end
+        else
+            for _,d in ipairs(drawings) do d.Visible = false end
+        end
+    end
+
+    conn = RunSrv.RenderStepped:Connect(Update)
+
+    local function Cleanup()
+        if conn then conn:Disconnect() end
+        for _,d in ipairs(drawings) do pcall(d.Remove, d) end
+    end
+
+    ESPObjs[plr] = {conn = conn, cleanup = Cleanup, drawings = drawings}
+end
+
+-----------------------------------------------------------------
+-- REMOVE ESP
+-----------------------------------------------------------------
+local function RemoveESP(plr)
+    if ESPObjs[plr] then ESPObjs[plr].cleanup(); ESPObjs[plr] = nil end
+end
+
+-----------------------------------------------------------------
+-- REFRESH ALL
+-----------------------------------------------------------------
+local function RefreshAll()
+    if not espEnabled then return end
+
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlr then
+            RemoveESP(p)
+            task.spawn(function()
+                if p.Character or p.CharacterAdded:Wait() then
+                    task.wait(0.1)
+                    CreateESP(p)
+                end
+            end)
+        end
+    end
+end
+
+-----------------------------------------------------------------
+-- PLAYER EVENTS
+-----------------------------------------------------------------
+Players.PlayerAdded:Connect(function(p)
+    if p ~= LocalPlr and espEnabled then
+        p.CharacterAdded:Connect(function()
+            task.wait(0.3)
+            CreateESP(p)
+        end)
+    end
+end)
+Players.PlayerRemoving:Connect(RemoveESP)
+
+-----------------------------------------------------------------
+-- UI ELEMENTS
+-----------------------------------------------------------------
+
+-- MASTER TOGGLE
+local ESPMasterToggle = ESPSection:Toggle({
+    Title = "ESP",
+    Desc = "View where players are located. ",
+    Icon = "lucide:circle-check",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        if not espMasterInitialized then
+            espMasterInitialized = true
+            if state then
+                espEnabled = true
+                WindUI:Notify({Title="ESP",Content="Enabled",Duration=2,Icon="lucide:eye"},true)
+                RefreshAll()
+            end
+            return
+        end
+
+        espEnabled = state
+        if state then
+            WindUI:Notify({Title="ESP",Content="Enabled・Powered by REM",Duration=2,Icon="lucide:eye"},true)
+            RefreshAll()
+        else
+            WindUI:Notify({Title="ESP",Content="Disabled",Duration=2,Icon="lucide:eye-off"},true)
+            for _,v in pairs(ESPObjs) do v.cleanup() end
+            ESPObjs = {}
+        end
+    end
+})
+
+-- FEATURE DROPDOWN
+local ESPFeatureDropdown = ESPSection:Dropdown({
+    Title = "ESP Elements",
+    Desc = "Select which ESP elements to show",
+    Values = {"Boxes", "Names", "Health Bars", "Tracers", "Show Teammates", "Rainbow"},
+    Value = {"Boxes", "Names", "Health Bars"},
+    Multi = true,
+    AllowNone = false,
+    Callback = function(selected)
+        if not espDropdownInitialized then
+            espDropdownInitialized = true
+            for _,v in ipairs(selected) do
+                if v == "Boxes"        then espFeatures.Boxes       = true
+                elseif v == "Names"    then espFeatures.Names       = true
+                elseif v == "Health Bars" then espFeatures.HealthBars  = true
+                elseif v == "Tracers"  then espFeatures.Tracers     = true
+                elseif v == "Show Teammates" then espFeatures.Teammates = true
+                elseif v == "Rainbow"  then espFeatures.Rainbow     = true
+                end
+            end
+            if espEnabled and espNeedsFirstRefresh then
+                espNeedsFirstRefresh = false
+                RefreshAll()
+            end
+            return
+        end
+
+        for k,_ in pairs(espFeatures) do espFeatures[k] = false end
+        for _,v in ipairs(selected) do
+            if v == "Boxes"        then espFeatures.Boxes       = true
+            elseif v == "Names"    then espFeatures.Names       = true
+            elseif v == "Health Bars" then espFeatures.HealthBars  = true
+            elseif v == "Tracers"  then espFeatures.Tracers     = true
+            elseif v == "Show Teammates" then espFeatures.Teammates = true
+            elseif v == "Rainbow"  then espFeatures.Rainbow     = true
+            end
+        end
+
+        if espEnabled then
+            RefreshAll()
+        end
+    end
+})
+
+--====================================================================--
+-- AIMBOT TAB – ESP-STYLE + SLIDERS UNDER DIVIDER
+--====================================================================--
+
+local AimbotTab = Window:Tab({
+    Title = "Aimbot",
+    Icon = "lucide:crosshair",
+    Locked = false,
+})
+
+local AimbotSection = AimbotTab:Section({
+    Title = "Silent Aimbot",
+    Icon = "target",
+    Box = true,
+    Opened = true,
+})
+
+-----------------------------------------------------------------
+-- AIMBOT STATE + FLAGS
+-----------------------------------------------------------------
+local aimbotEnabled = false
+local aimbotFeatures = {
+    TeamCheck     = true,
+    VisibleCheck  = false,
+    Prediction    = false,
+    Smoothing     = true,
+    FOVCircle     = true,
+}
+
+local aimbotMasterInitialized = false
+local aimbotDropdownInitialized = false
+
+local aimPart = "Head"               -- FIXED
+local circleRadius = 120             -- FIXED
+local sensitivity = 0.25
+local smoothSetting = 0.2            -- 0.0 = instant, 1.0 = very smooth
+local predictionFactor = 0.1         -- 0.0 = no prediction, 0.5 = high
+
+-----------------------------------------------------------------
+-- SERVICES
+-----------------------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlr = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-----------------------------------------------------------------
+-- FOV CIRCLE (Purple, fixed size, toggleable)
+-----------------------------------------------------------------
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Filled = false
+FOVCircle.Transparency = 0.7
+FOVCircle.NumSides = 64
+FOVCircle.Thickness = 2
+FOVCircle.Color = Color3.fromRGB(138, 43, 226)
+FOVCircle.Radius = circleRadius
+
+local function UpdateFOVCircle()
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
+end
+RunService.RenderStepped:Connect(UpdateFOVCircle)
+
+-----------------------------------------------------------------
+-- VISIBILITY CHECK
+-----------------------------------------------------------------
+local function isVisible(targetPart)
+    if not targetPart then return false end
+    local origin = Camera.CFrame.Position
+    local direction = (targetPart.Position - origin).Unit * 500
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.FilterDescendantsInstances = {LocalPlr.Character or {}, Camera}
+    params.IgnoreWater = true
+    local result = workspace:Raycast(origin, direction, params)
+    return not result or (result.Instance and result.Instance:IsDescendantOf(targetPart.Parent))
+end
+
+-----------------------------------------------------------------
+-- PREDICTION
+-----------------------------------------------------------------
+local function resolveTargetPosition(target)
+    if not target or not target:FindFirstChild(aimPart) then return nil end
+    local targetPart = target:FindFirstChild(aimPart)
+    local pos = targetPart.Position
+    if aimbotFeatures.Prediction and targetPart.Velocity then
+        pos = pos + (targetPart.Velocity * predictionFactor)
+    end
+    return pos
+end
+
+-----------------------------------------------------------------
+-- GET CLOSEST PLAYER IN FOV
+-----------------------------------------------------------------
+local function getClosestPlayerInFOV()
+    local closest = nil
+    local bestDist = circleRadius
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlr and plr.Character and plr.Character:FindFirstChild(aimPart) then
+            if aimbotFeatures.TeamCheck and LocalPlr.Team and plr.Team and LocalPlr.Team == plr.Team then continue end
+            local part = plr.Character:FindFirstChild(aimPart)
+            if aimbotFeatures.VisibleCheck and not isVisible(part) then continue end
+            local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+            if onScreen then
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                if dist < bestDist then
+                    bestDist = dist
+                    closest = plr.Character
+                end
+            end
+        end
+    end
+    return closest
+end
+
+-----------------------------------------------------------------
+-- AIM AT TARGET
+-----------------------------------------------------------------
+local function trackTarget(target)
+    if not target then return end
+    local pos = resolveTargetPosition(target)
+    if not pos then return end
+    local targetCFrame = CFrame.new(Camera.CFrame.Position, pos)
+    local lerpVal = aimbotFeatures.Smoothing and ((1 - smoothSetting) * sensitivity + smoothSetting * 0.1) or sensitivity
+    Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, lerpVal)
+end
+
+-----------------------------------------------------------------
+-- HOLD RMB TO AIM
+-----------------------------------------------------------------
+local aimbotActive = false
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 and aimbotEnabled then
+        aimbotActive = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        aimbotActive = false
+    end
+end)
+
+-----------------------------------------------------------------
+-- MAIN LOOP
+-----------------------------------------------------------------
+RunService.RenderStepped:Connect(function()
+    if aimbotActive and aimbotEnabled then
+        local target = getClosestPlayerInFOV()
+        if target then trackTarget(target) end
+    end
+end)
+
+-----------------------------------------------------------------
+-- UI: MASTER TOGGLE
+-----------------------------------------------------------------
+local AimbotMasterToggle = AimbotSection:Toggle({
+    Title = "Aimbot Master",
+    Desc = "Hold RMB to aim",
+    Icon = "lucide:crosshair",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        if not aimbotMasterInitialized then aimbotMasterInitialized = true; return end
+
+        aimbotEnabled = state
+        FOVCircle.Visible = state and aimbotFeatures.FOVCircle
+
+        if state then
+            WindUI:Notify({Title="Aimbot",Content="Enabled",Duration=2,Icon="lucide:zap"},true)
+        else
+            WindUI:Notify({Title="Aimbot",Content="Disabled",Duration=2,Icon="lucide:zap-off"},true)
+        end
+    end
+})
+
+-----------------------------------------------------------------
+-- UI: FEATURE DROPDOWN (includes FOV Circle)
+-----------------------------------------------------------------
+local AimbotFeatureDropdown = AimbotSection:Dropdown({
+    Title = "Aimbot Features",
+    Desc = "Select what to enable",
+    Values = {"Team Check", "Visible Check", "Prediction", "Smoothing", "FOV Circle"},
+    Value = {"Team Check", "Smoothing", "FOV Circle"},
+    Multi = true,
+    AllowNone = false,
+    Callback = function(selected)
+        if not aimbotDropdownInitialized then
+            aimbotDropdownInitialized = true
+            for _, v in ipairs(selected) do
+                if v == "Team Check"     then aimbotFeatures.TeamCheck     = true
+                elseif v == "Visible Check"  then aimbotFeatures.VisibleCheck  = true
+                elseif v == "Prediction" then aimbotFeatures.Prediction    = true
+                elseif v == "Smoothing"  then aimbotFeatures.Smoothing     = true
+                elseif v == "FOV Circle" then aimbotFeatures.FOVCircle     = true
+                end
+            end
+            FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
+            return
+        end
+
+        for k,_ in pairs(aimbotFeatures) do aimbotFeatures[k] = false end
+        for _, v in ipairs(selected) do
+            if v == "Team Check"     then aimbotFeatures.TeamCheck     = true
+            elseif v == "Visible Check"  then aimbotFeatures.VisibleCheck  = true
+            elseif v == "Prediction" then aimbotFeatures.Prediction    = true
+            elseif v == "Smoothing"  then aimbotFeatures.Smoothing     = true
+            elseif v == "FOV Circle" then aimbotFeatures.FOVCircle     = true
+            end
+        end
+
+        FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
+    end
+})
+
+-- DIVIDER
+AimbotSection:Divider()
+
+-----------------------------------------------------------------
+-- SLIDERS: UNDER DIVIDER
+-----------------------------------------------------------------
+
+-- SMOOTHING SLIDER
+local SmoothingSlider = AimbotSection:Slider({
+    Title = "Smoothing",
+    Desc = "0.0 = instant, 1.0 = very smooth",
+    Value = { Min = 0, Max = 1, Default = 0.2 },
+    Step = 0.01,
+    Callback = function(value)
+        smoothSetting = value
+    end
+})
+
+-- PREDICTION FACTOR SLIDER
+local PredictionSlider = AimbotSection:Slider({
+    Title = "Prediction Strength",
+    Desc = "Configure",
+    Value = { Min = 0, Max = 0.5, Default = 0.1 },
+    Step = 0.01,
+    Callback = function(value)
+        predictionFactor = value
+    end
+})
+
+local SettingsTab = Window:Tab({
+    Title = "Settings",
+    Icon = "settings",
+    Locked = false,
+})
+
+local UISettingsSection = SettingsTab:Section({ 
+    Title = "UI Settings",
+    Box = true,
+    Opened = true,
+})
+
+local UIKeybind = UISettingsSection:Keybind({
+    Title = "UI Toggle Key",
+    Desc = "Key to open/close the UI",
+    Value = "P",
+    Callback = function(v)
+        Window:SetToggleKey(Enum.KeyCode[v])
     end
 })

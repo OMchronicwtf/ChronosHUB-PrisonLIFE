@@ -508,13 +508,253 @@ local NoclipToggle = PlayerSection:Toggle({
 -- ESP TAB – master toggle + dropdown + TEAM‑COLOUR ESP (FIXED TeamColor)
 --====================================================================--
 
-local ESPTab = Window:Tab({
-    Title = "ESP",
-    Icon = "lucide:eye",
+local AimbotTab = Window:Tab({
+    Title = "Aimbot",
+    Icon = "lucide:target",
     Locked = false,
 })
 
-local ESPSection = ESPTab:Section({
+local AimbotSection = AimbotTab:Section({
+    Title = "Aimbot",
+    Icon = "lucide:crosshair",
+    Box = true,
+    Opened = true,
+})
+
+-----------------------------------------------------------------
+-- AIMBOT STATE + FLAGS
+-----------------------------------------------------------------
+local aimbotEnabled = false
+local aimbotFeatures = {
+    TeamCheck     = true,
+    VisibleCheck  = false,
+    Prediction    = false,
+    Smoothing     = true,
+    FOVCircle     = true,
+}
+
+local aimbotMasterInitialized = false
+local aimbotDropdownInitialized = false
+
+local aimPart = "Head"               -- FIXED
+local circleRadius = 120             -- FIXED
+local sensitivity = 0.25
+local smoothSetting = 0.2            -- 0.0 = instant, 1.0 = very smooth
+local predictionFactor = 0.1         -- 0.0 = no prediction, 0.5 = high
+
+-----------------------------------------------------------------
+-- SERVICES
+-----------------------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlr = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-----------------------------------------------------------------
+-- FOV CIRCLE (Purple, fixed size, toggleable)
+-----------------------------------------------------------------
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Filled = false
+FOVCircle.Transparency = 0.7
+FOVCircle.NumSides = 64
+FOVCircle.Thickness = 2
+FOVCircle.Color = Color3.fromRGB(138, 43, 226)
+FOVCircle.Radius = circleRadius
+
+local function UpdateFOVCircle()
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
+end
+RunService.RenderStepped:Connect(UpdateFOVCircle)
+
+-----------------------------------------------------------------
+-- VISIBILITY CHECK
+-----------------------------------------------------------------
+local function isVisible(targetPart)
+    if not targetPart then return false end
+    local origin = Camera.CFrame.Position
+    local direction = (targetPart.Position - origin).Unit * 500
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.FilterDescendantsInstances = {LocalPlr.Character or {}, Camera}
+    params.IgnoreWater = true
+    local result = workspace:Raycast(origin, direction, params)
+    return not result or (result.Instance and result.Instance:IsDescendantOf(targetPart.Parent))
+end
+
+-----------------------------------------------------------------
+-- PREDICTION
+-----------------------------------------------------------------
+local function resolveTargetPosition(target)
+    if not target or not target:FindFirstChild(aimPart) then return nil end
+    local targetPart = target:FindFirstChild(aimPart)
+    local pos = targetPart.Position
+    if aimbotFeatures.Prediction and targetPart.Velocity then
+        pos = pos + (targetPart.Velocity * predictionFactor)
+    end
+    return pos
+end
+
+-----------------------------------------------------------------
+-- GET CLOSEST PLAYER IN FOV
+-----------------------------------------------------------------
+local function getClosestPlayerInFOV()
+    local closest = nil
+    local bestDist = circleRadius
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlr and plr.Character and plr.Character:FindFirstChild(aimPart) then
+            if aimbotFeatures.TeamCheck and LocalPlr.Team and plr.Team and LocalPlr.Team == plr.Team then continue end
+            local part = plr.Character:FindFirstChild(aimPart)
+            if aimbotFeatures.VisibleCheck and not isVisible(part) then continue end
+            local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+            if onScreen then
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                if dist < bestDist then
+                    bestDist = dist
+                    closest = plr.Character
+                end
+            end
+        end
+    end
+    return closest
+end
+
+-----------------------------------------------------------------
+-- AIM AT TARGET
+-----------------------------------------------------------------
+local function trackTarget(target)
+    if not target then return end
+    local pos = resolveTargetPosition(target)
+    if not pos then return end
+    local targetCFrame = CFrame.new(Camera.CFrame.Position, pos)
+    local lerpVal = aimbotFeatures.Smoothing and ((1 - smoothSetting) * sensitivity + smoothSetting * 0.1) or sensitivity
+    Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, lerpVal)
+end
+
+-----------------------------------------------------------------
+-- HOLD RMB TO AIM
+-----------------------------------------------------------------
+local aimbotActive = false
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 and aimbotEnabled then
+        aimbotActive = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        aimbotActive = false
+    end
+end)
+
+-----------------------------------------------------------------
+-- MAIN LOOP
+-----------------------------------------------------------------
+RunService.RenderStepped:Connect(function()
+    if aimbotActive and aimbotEnabled then
+        local target = getClosestPlayerInFOV()
+        if target then trackTarget(target) end
+    end
+end)
+
+-----------------------------------------------------------------
+-- UI: MASTER TOGGLE
+-----------------------------------------------------------------
+local AimbotMasterToggle = AimbotSection:Toggle({
+    Title = "Aimbot",
+    Desc = "Aim-Lock onto players.",
+    Icon = "lucide:circle-check",
+    Type = "Checkbox",
+    Default = false,
+    Callback = function(state)
+        if not aimbotMasterInitialized then aimbotMasterInitialized = true; return end
+
+        aimbotEnabled = state
+        FOVCircle.Visible = state and aimbotFeatures.FOVCircle
+
+        if state then
+            WindUI:Notify({Title="Aimbot",Content="Enabled・Powered by REM",Duration=2,Icon="lucide:crosshair"},true)
+        else
+            WindUI:Notify({Title="Aimbot",Content="Disabled",Duration=2,Icon="lucide:circle-x"},true)
+        end
+    end
+})
+
+-----------------------------------------------------------------
+-- UI: FEATURE DROPDOWN (includes FOV Circle)
+-----------------------------------------------------------------
+local AimbotFeatureDropdown = AimbotSection:Dropdown({
+    Title = "Elements",
+    Desc = "",
+    Values = {"Team Check", "Visible Check", "Prediction", "Smoothing", "FOV Circle"},
+    Value = {"Team Check", "Visible Check", "Smoothing", "FOV Circle"},
+    Multi = true,
+    AllowNone = false,
+    Callback = function(selected)
+        if not aimbotDropdownInitialized then
+            aimbotDropdownInitialized = true
+            for _, v in ipairs(selected) do
+                if v == "Team Check"     then aimbotFeatures.TeamCheck     = true
+                elseif v == "Visible Check"  then aimbotFeatures.VisibleCheck  = true
+                elseif v == "Prediction" then aimbotFeatures.Prediction    = true
+                elseif v == "Smoothing"  then aimbotFeatures.Smoothing     = true
+                elseif v == "FOV Circle" then aimbotFeatures.FOVCircle     = true
+                end
+            end
+            FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
+            return
+        end
+
+        for k,_ in pairs(aimbotFeatures) do aimbotFeatures[k] = false end
+        for _, v in ipairs(selected) do
+            if v == "Team Check"     then aimbotFeatures.TeamCheck     = true
+            elseif v == "Visible Check"  then aimbotFeatures.VisibleCheck  = true
+            elseif v == "Prediction" then aimbotFeatures.Prediction    = true
+            elseif v == "Smoothing"  then aimbotFeatures.Smoothing     = true
+            elseif v == "FOV Circle" then aimbotFeatures.FOVCircle     = true
+            end
+        end
+
+        FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
+    end
+})
+
+-- DIVIDER
+AimbotSection:Divider()
+
+-----------------------------------------------------------------
+-- SLIDERS: UNDER DIVIDER
+-----------------------------------------------------------------
+
+-- SMOOTHING SLIDER
+local SmoothingSlider = AimbotSection:Slider({
+    Title = "Smoothing",
+    Desc = "Higher = Smoother",
+    Value = { Min = 0, Max = 1, Default = 0.2 },
+    Step = 0.01,
+    Callback = function(value)
+        smoothSetting = value
+    end
+})
+
+-- PREDICTION FACTOR SLIDER
+local PredictionSlider = AimbotSection:Slider({
+    Title = "Prediction Strength",
+    Desc = "Higher = Stronger",
+    Value = { Min = 0, Max = 0.5, Default = 0.1 },
+    Step = 0.01,
+    Callback = function(value)
+        predictionFactor = value
+    end
+})
+
+local ESPSection = AimbotTab:Section({
     Title = "ESP",
     Icon = "users",
     Box = true,
@@ -720,7 +960,7 @@ Players.PlayerRemoving:Connect(RemoveESP)
 -- MASTER TOGGLE
 local ESPMasterToggle = ESPSection:Toggle({
     Title = "ESP",
-    Desc = "View where players are located. ",
+    Desc = "View where players are located.",
     Icon = "lucide:circle-check",
     Type = "Checkbox",
     Default = false,
@@ -729,7 +969,6 @@ local ESPMasterToggle = ESPSection:Toggle({
             espMasterInitialized = true
             if state then
                 espEnabled = true
-                WindUI:Notify({Title="ESP",Content="Enabled",Duration=2,Icon="lucide:eye"},true)
                 RefreshAll()
             end
             return
@@ -749,8 +988,8 @@ local ESPMasterToggle = ESPSection:Toggle({
 
 -- FEATURE DROPDOWN
 local ESPFeatureDropdown = ESPSection:Dropdown({
-    Title = "ESP Elements",
-    Desc = "Select which ESP elements to show",
+    Title = "Elements",
+    Desc = "",
     Values = {"Boxes", "Names", "Health Bars", "Tracers", "Show Teammates", "Rainbow"},
     Value = {"Boxes", "Names", "Health Bars"},
     Multi = true,
@@ -788,256 +1027,6 @@ local ESPFeatureDropdown = ESPSection:Dropdown({
         if espEnabled then
             RefreshAll()
         end
-    end
-})
-
---====================================================================--
--- AIMBOT TAB – ESP-STYLE + SLIDERS UNDER DIVIDER
---====================================================================--
-
-local AimbotTab = Window:Tab({
-    Title = "Aimbot",
-    Icon = "lucide:crosshair",
-    Locked = false,
-})
-
-local AimbotSection = AimbotTab:Section({
-    Title = "Silent Aimbot",
-    Icon = "target",
-    Box = true,
-    Opened = true,
-})
-
------------------------------------------------------------------
--- AIMBOT STATE + FLAGS
------------------------------------------------------------------
-local aimbotEnabled = false
-local aimbotFeatures = {
-    TeamCheck     = true,
-    VisibleCheck  = false,
-    Prediction    = false,
-    Smoothing     = true,
-    FOVCircle     = true,
-}
-
-local aimbotMasterInitialized = false
-local aimbotDropdownInitialized = false
-
-local aimPart = "Head"               -- FIXED
-local circleRadius = 120             -- FIXED
-local sensitivity = 0.25
-local smoothSetting = 0.2            -- 0.0 = instant, 1.0 = very smooth
-local predictionFactor = 0.1         -- 0.0 = no prediction, 0.5 = high
-
------------------------------------------------------------------
--- SERVICES
------------------------------------------------------------------
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local LocalPlr = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
-
------------------------------------------------------------------
--- FOV CIRCLE (Purple, fixed size, toggleable)
------------------------------------------------------------------
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Filled = false
-FOVCircle.Transparency = 0.7
-FOVCircle.NumSides = 64
-FOVCircle.Thickness = 2
-FOVCircle.Color = Color3.fromRGB(138, 43, 226)
-FOVCircle.Radius = circleRadius
-
-local function UpdateFOVCircle()
-    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-    FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
-end
-RunService.RenderStepped:Connect(UpdateFOVCircle)
-
------------------------------------------------------------------
--- VISIBILITY CHECK
------------------------------------------------------------------
-local function isVisible(targetPart)
-    if not targetPart then return false end
-    local origin = Camera.CFrame.Position
-    local direction = (targetPart.Position - origin).Unit * 500
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    params.FilterDescendantsInstances = {LocalPlr.Character or {}, Camera}
-    params.IgnoreWater = true
-    local result = workspace:Raycast(origin, direction, params)
-    return not result or (result.Instance and result.Instance:IsDescendantOf(targetPart.Parent))
-end
-
------------------------------------------------------------------
--- PREDICTION
------------------------------------------------------------------
-local function resolveTargetPosition(target)
-    if not target or not target:FindFirstChild(aimPart) then return nil end
-    local targetPart = target:FindFirstChild(aimPart)
-    local pos = targetPart.Position
-    if aimbotFeatures.Prediction and targetPart.Velocity then
-        pos = pos + (targetPart.Velocity * predictionFactor)
-    end
-    return pos
-end
-
------------------------------------------------------------------
--- GET CLOSEST PLAYER IN FOV
------------------------------------------------------------------
-local function getClosestPlayerInFOV()
-    local closest = nil
-    local bestDist = circleRadius
-    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlr and plr.Character and plr.Character:FindFirstChild(aimPart) then
-            if aimbotFeatures.TeamCheck and LocalPlr.Team and plr.Team and LocalPlr.Team == plr.Team then continue end
-            local part = plr.Character:FindFirstChild(aimPart)
-            if aimbotFeatures.VisibleCheck and not isVisible(part) then continue end
-            local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-            if onScreen then
-                local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-                if dist < bestDist then
-                    bestDist = dist
-                    closest = plr.Character
-                end
-            end
-        end
-    end
-    return closest
-end
-
------------------------------------------------------------------
--- AIM AT TARGET
------------------------------------------------------------------
-local function trackTarget(target)
-    if not target then return end
-    local pos = resolveTargetPosition(target)
-    if not pos then return end
-    local targetCFrame = CFrame.new(Camera.CFrame.Position, pos)
-    local lerpVal = aimbotFeatures.Smoothing and ((1 - smoothSetting) * sensitivity + smoothSetting * 0.1) or sensitivity
-    Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, lerpVal)
-end
-
------------------------------------------------------------------
--- HOLD RMB TO AIM
------------------------------------------------------------------
-local aimbotActive = false
-
-UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton2 and aimbotEnabled then
-        aimbotActive = true
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input, processed)
-    if processed then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
-        aimbotActive = false
-    end
-end)
-
------------------------------------------------------------------
--- MAIN LOOP
------------------------------------------------------------------
-RunService.RenderStepped:Connect(function()
-    if aimbotActive and aimbotEnabled then
-        local target = getClosestPlayerInFOV()
-        if target then trackTarget(target) end
-    end
-end)
-
------------------------------------------------------------------
--- UI: MASTER TOGGLE
------------------------------------------------------------------
-local AimbotMasterToggle = AimbotSection:Toggle({
-    Title = "Aimbot Master",
-    Desc = "Hold RMB to aim",
-    Icon = "lucide:crosshair",
-    Type = "Checkbox",
-    Default = false,
-    Callback = function(state)
-        if not aimbotMasterInitialized then aimbotMasterInitialized = true; return end
-
-        aimbotEnabled = state
-        FOVCircle.Visible = state and aimbotFeatures.FOVCircle
-
-        if state then
-            WindUI:Notify({Title="Aimbot",Content="Enabled",Duration=2,Icon="lucide:zap"},true)
-        else
-            WindUI:Notify({Title="Aimbot",Content="Disabled",Duration=2,Icon="lucide:zap-off"},true)
-        end
-    end
-})
-
------------------------------------------------------------------
--- UI: FEATURE DROPDOWN (includes FOV Circle)
------------------------------------------------------------------
-local AimbotFeatureDropdown = AimbotSection:Dropdown({
-    Title = "Aimbot Features",
-    Desc = "Select what to enable",
-    Values = {"Team Check", "Visible Check", "Prediction", "Smoothing", "FOV Circle"},
-    Value = {"Team Check", "Smoothing", "FOV Circle"},
-    Multi = true,
-    AllowNone = false,
-    Callback = function(selected)
-        if not aimbotDropdownInitialized then
-            aimbotDropdownInitialized = true
-            for _, v in ipairs(selected) do
-                if v == "Team Check"     then aimbotFeatures.TeamCheck     = true
-                elseif v == "Visible Check"  then aimbotFeatures.VisibleCheck  = true
-                elseif v == "Prediction" then aimbotFeatures.Prediction    = true
-                elseif v == "Smoothing"  then aimbotFeatures.Smoothing     = true
-                elseif v == "FOV Circle" then aimbotFeatures.FOVCircle     = true
-                end
-            end
-            FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
-            return
-        end
-
-        for k,_ in pairs(aimbotFeatures) do aimbotFeatures[k] = false end
-        for _, v in ipairs(selected) do
-            if v == "Team Check"     then aimbotFeatures.TeamCheck     = true
-            elseif v == "Visible Check"  then aimbotFeatures.VisibleCheck  = true
-            elseif v == "Prediction" then aimbotFeatures.Prediction    = true
-            elseif v == "Smoothing"  then aimbotFeatures.Smoothing     = true
-            elseif v == "FOV Circle" then aimbotFeatures.FOVCircle     = true
-            end
-        end
-
-        FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
-    end
-})
-
--- DIVIDER
-AimbotSection:Divider()
-
------------------------------------------------------------------
--- SLIDERS: UNDER DIVIDER
------------------------------------------------------------------
-
--- SMOOTHING SLIDER
-local SmoothingSlider = AimbotSection:Slider({
-    Title = "Smoothing",
-    Desc = "0.0 = instant, 1.0 = very smooth",
-    Value = { Min = 0, Max = 1, Default = 0.2 },
-    Step = 0.01,
-    Callback = function(value)
-        smoothSetting = value
-    end
-})
-
--- PREDICTION FACTOR SLIDER
-local PredictionSlider = AimbotSection:Slider({
-    Title = "Prediction Strength",
-    Desc = "Configure",
-    Value = { Min = 0, Max = 0.5, Default = 0.1 },
-    Step = 0.01,
-    Callback = function(value)
-        predictionFactor = value
     end
 })
 

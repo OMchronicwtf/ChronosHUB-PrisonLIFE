@@ -1087,273 +1087,313 @@ AimbotSection:Slider({
     Callback = function(value) InitializeAimbot() predictionFactor = value end
 })
 
+--//=====================================================================
+--//  MOBILE CENTER-LOCK AIMBOT (tap → lock, tap centre → unlock)
+--//=====================================================================
+
 local SilentSection = AimbotTab:Section({Title = "Mobile Aim", Icon = "lucide:zap", Box = true, Opened = false})
 
--- settings (now REAL aimbot)
-local aimbotEnabled = false
-local aimbotInitialized = false
-local aimbotFeatures = { TeamCheck = true, VisibleCheck = true, Prediction = true, FOVCircle = true }
-local aimbotAimPart = "Head" -- hardcoded
-local aimbotFOVRadius = 120
-local aimbotPredictionStrength = 0.12
-local aimbotSmoothness = 0.15 -- NEW: camera smoothing for mobile
+-- SETTINGS --------------------------------------------------------------
+local aimbotEnabled      = false
+local aimbotInitialized   = false
+local aimbotFeatures = { TeamCheck = true, VisibleCheck = false, Prediction = true, FOVCircle = true }
 
--- drawing objects
-local FOVCircle = nil
-local TargetSquare = nil
-local PredictedMarker = nil
+local aimbotAimPart       = "Head"
+local aimbotFOVRadius     = 120          -- tap detection radius
+local aimbotPrediction   = 0.12
+local aimbotSmoothness    = 0.18         -- 0.1 = snappy, 0.3 = buttery
 
--- services
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local Camera = workspace.CurrentCamera
+-- LOCK STATE ------------------------------------------------------------
+local isLocked            = false
+local lockedTarget        = nil          -- Character we are locked onto
+local unlockButton        = nil          -- Drawing circle in centre
+
+-- DRAWING OBJECTS -------------------------------------------------------
+local FOVCircle           = nil
+local TargetBox           = nil
+local PredictDot          = nil
+
+-- SERVICES --------------------------------------------------------------
+local Players   = game:GetService("Players")
+local RunService= game:GetService("RunService")
+local UIS       = game:GetService("UserInputService")
+local Camera    = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 local Workspace = workspace
 
--- target tracking
-local currentTarget = nil
-local originalCameraCFrame = nil
-
--- team check
+--=====================================================================
+--//  UTILS
+--=====================================================================
 local function IsValidTarget(plr)
     if plr == LocalPlayer then return false end
-    if aimbotFeatures.TeamCheck and LocalPlayer.Team and plr.Team and LocalPlayer.Team == plr.Team then return false end
+    if aimbotFeatures.TeamCheck and LocalPlayer.Team and plr.Team
+        and LocalPlayer.Team == plr.Team then return false end
     return plr.Character and plr.Character:FindFirstChild(aimbotAimPart)
 end
 
--- visibility check
 local function IsVisible(part)
     if not part then return false end
     local origin = Camera.CFrame.Position
-    local direction = (part.Position - origin).Unit * 500
+    local dir    = (part.Position - origin).Unit * 500
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Blacklist
     params.FilterDescendantsInstances = {LocalPlayer.Character or {}, Camera}
     params.IgnoreWater = true
-    local result = Workspace:Raycast(origin, direction, params)
+    local result = Workspace:Raycast(origin, dir, params)
     return not result or result.Instance:IsDescendantOf(part.Parent)
 end
 
--- predict position
-local function GetPredictedPosition(char)
+local function GetPredictedPos(char)
     local part = char:FindFirstChild(aimbotAimPart)
     if not part then return nil end
-    
     local pos = part.Position
     if aimbotFeatures.Prediction and part.Velocity.Magnitude > 0 then
-        pos = pos + (part.Velocity * aimbotPredictionStrength)
+        pos = pos + (part.Velocity * aimbotPrediction)
     end
     return pos
 end
 
--- get closest target in FOV
-local function GetClosestTarget()
-    local closest, bestDist = nil, aimbotFOVRadius
-    local mousePos = UserInputService:GetMouseLocation()
-    
+--=====================================================================
+--//  FIND TARGET UNDER TAP
+--=====================================================================
+local function FindTargetUnderTouch(touchPos : Vector2)
+    local best, bestDist = nil, aimbotFOVRadius
+
     for _, plr in ipairs(Players:GetPlayers()) do
-        if IsValidTarget(plr) and aimbotFeatures.VisibleCheck == false or IsVisible(plr.Character:FindFirstChild(aimbotAimPart)) then
-            local predictedPos = GetPredictedPosition(plr.Character)
-            if predictedPos then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(predictedPos)
-                if onScreen then
-                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
-                    if dist < bestDist then
-                        bestDist = dist
-                        closest = plr.Character
-                    end
-                end
-            end
+        if not IsValidTarget(plr) then continue end
+        local part = plr.Character:FindFirstChild(aimbotAimPart)
+        if aimbotFeatures.VisibleCheck and not IsVisible(part) then continue end
+
+        local pred = GetPredictedPos(plr.Character)
+        if not pred then continue end
+
+        local scr, onScreen = Camera:WorldToViewportPoint(pred)
+        if not onScreen then continue end
+
+        local dist = (Vector2.new(scr.X, scr.Y) - touchPos).Magnitude
+        if dist < bestDist then
+            bestDist = dist
+            best    = plr.Character
         end
     end
-    
-    return closest
+    return best
 end
 
--- smooth camera aim
-local function AimAtTarget(targetChar)
-    if not targetChar then 
-        currentTarget = nil
-        return 
-    end
-    
-    local predictedPos = GetPredictedPosition(targetChar)
-    if not predictedPos then return end
-    
-    local targetCFrame = CFrame.lookAt(Camera.CFrame.Position, predictedPos)
-    
-    -- smooth interpolation (mobile-friendly)
+--=====================================================================
+--//  KEEP TARGET IN CENTRE
+--=====================================================================
+local function KeepTargetCentred()
+    if not isLocked or not lockedTarget then return end
+
+    local pred = GetPredictedPos(lockedTarget)
+    if not pred then return end
+
+    local camPos = Camera.CFrame.Position
+    local targetCFrame = CFrame.lookAt(camPos, pred)
+
     Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, aimbotSmoothness)
-    currentTarget = targetChar
 end
 
--- main aimbot loop
-local function UpdateAimbot()
-    if not aimbotEnabled then 
-        currentTarget = nil
-        return 
-    end
-    
-    local closestTarget = GetClosestTarget()
-    AimAtTarget(closestTarget)
-end
-
--- update visuals
+--=====================================================================
+--//  VISUALS
+--=====================================================================
 local function UpdateVisuals()
-    local mousePos = UserInputService:GetMouseLocation()
-    
-    -- FOV Circle
+    local centre = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+
+    -- FOV circle (only when NOT locked)
     if FOVCircle then
-        FOVCircle.Radius = aimbotFOVRadius
-        FOVCircle.Position = mousePos
-        FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle
+        FOVCircle.Visible = aimbotEnabled and aimbotFeatures.FOVCircle and not isLocked
+        if FOVCircle.Visible then
+            local mouse = UIS:GetMouseLocation()
+            FOVCircle.Position = mouse
+            FOVCircle.Radius   = aimbotFOVRadius
+        end
     end
-    
-    -- Target indicators
-    if TargetSquare then TargetSquare.Visible = false end
-    if PredictedMarker then PredictedMarker.Visible = false end
-    
-    if aimbotEnabled and currentTarget then
-        local part = currentTarget:FindFirstChild(aimbotAimPart)
+
+    -- Unlock button (small circle in centre when locked)
+    if unlockButton then
+        unlockButton.Visible = aimbotEnabled and isLocked
+        if unlockButton.Visible then
+            unlockButton.Position = centre
+        end
+    end
+
+    -- Target box & prediction dot
+    TargetBox.Visible   = false
+    PredictDot.Visible  = false
+
+    if isLocked and lockedTarget then
+        local part = lockedTarget:FindFirstChild(aimbotAimPart)
         if part then
-            local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-            if onScreen then
-                TargetSquare.Position = Vector2.new(screenPos.X - 8, screenPos.Y - 8)
-                TargetSquare.Size = Vector2.new(16, 16)
-                TargetSquare.Visible = true
-                TargetSquare.Color = Color3.fromRGB(0, 255, 0) -- Green for locked
+            local scr, on = Camera:WorldToViewportPoint(part.Position)
+            if on then
+                TargetBox.Position = Vector2.new(scr.X-20, scr.Y-20)
+                TargetBox.Size     = Vector2.new(40,40)
+                TargetBox.Visible  = true
             end
-            
-            if aimbotFeatures.Prediction then
-                local predPos = GetPredictedPosition(currentTarget)
-                if predPos then
-                    local predScreen, predOnScreen = Camera:WorldToViewportPoint(predPos)
-                    if predOnScreen then
-                        PredictedMarker.Position = Vector2.new(predScreen.X, predScreen.Y)
-                        PredictedMarker.Visible = true
-                    end
+        end
+
+        if aimbotFeatures.Prediction then
+            local pred = GetPredictedPos(lockedTarget)
+            if pred then
+                local scr, on = Camera:WorldToViewportPoint(pred)
+                if on then
+                    PredictDot.Position = Vector2.new(scr.X, scr.Y)
+                    PredictDot.Visible  = true
                 end
             end
         end
     end
 end
 
--- initialization
-local function InitializeAimbot()
+--=====================================================================
+--//  INPUT HANDLING
+--=====================================================================
+local inputConn = {}
+local function SetupInput()
+    for _,c in ipairs(inputConn) do c:Disconnect() end
+    inputConn = {}
+
+    table.insert(inputConn, UIS.InputBegan:Connect(function(input, gp)
+        if gp or not aimbotEnabled then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+           and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        local pos = UIS:GetMouseLocation()
+
+        -- 1. If locked → check tap on unlock button
+        if isLocked and unlockButton then
+            local centre = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+            if (pos - centre).Magnitude <= unlockButton.Radius then
+                isLocked     = false
+                lockedTarget = nil
+                return
+            end
+        end
+
+        -- 2. Find a player under the tap
+        local newTarget = FindTargetUnderTouch(pos)
+        if newTarget then
+            lockedTarget = newTarget
+            isLocked     = true
+        end
+    end))
+end
+
+--=====================================================================
+--//  INITIALISATION
+--=====================================================================
+local function Init()
     if aimbotInitialized then return end
     aimbotInitialized = true
-    
-    -- FOV Circle
+
+    -- FOV circle (search mode)
     FOVCircle = Drawing.new("Circle")
-    FOVCircle.Filled = false
-    FOVCircle.Transparency = 0.8
-    FOVCircle.NumSides = 64
-    FOVCircle.Thickness = 2
-    FOVCircle.Color = Color3.fromRGB(255, 84, 0)
-    FOVCircle.Radius = aimbotFOVRadius
-    FOVCircle.Visible = false
-    
-    -- Target Square
-    TargetSquare = Drawing.new("Square")
-    TargetSquare.Filled = true
-    TargetSquare.Size = Vector2.new(16, 16)
-    TargetSquare.Thickness = 1
-    TargetSquare.Color = Color3.fromRGB(0, 255, 0)
-    TargetSquare.Visible = false
-    TargetSquare.Transparency = 0.7
-    
-    -- Prediction Marker
-    PredictedMarker = Drawing.new("Circle")
-    PredictedMarker.Filled = true
-    PredictedMarker.NumSides = 24
-    PredictedMarker.Radius = 4
-    PredictedMarker.Thickness = 1
-    PredictedMarker.Color = Color3.fromRGB(255, 200, 0)
-    PredictedMarker.Visible = false
-    
-    -- Connect loops
-    RunService.Heartbeat:Connect(UpdateAimbot)  -- Aim loop (pre-render)
-    RunService.RenderStepped:Connect(UpdateVisuals)  -- Visuals only
+    FOVCircle.Filled      = false
+    FOVCircle.Transparency= 0.8
+    FOVCircle.NumSides    = 64
+    FOVCircle.Thickness   = 3
+    FOVCircle.Color       = Color3.fromRGB(255,84,0)
+    FOVCircle.Radius      = aimbotFOVRadius
+    FOVCircle.Visible     = false
+
+    -- Target box
+    TargetBox = Drawing.new("Square")
+    TargetBox.Filled      = true
+    TargetBox.Thickness   = 2
+    TargetBox.Color       = Color3.fromRGB(0,255,0)
+    TargetBox.Transparency= 0.7
+    TargetBox.Visible     = false
+
+    -- Prediction dot
+    PredictDot = Drawing.new("Circle")
+    PredictDot.Filled      = true
+    PredictDot.NumSides    = 24
+    PredictDot.Radius      = 6
+    PredictDot.Thickness   = 1
+    PredictDot.Color       = Color3.fromRGB(255,200,0)
+    PredictDot.Visible     = false
+
+    -- Unlock button (small centre circle)
+    unlockButton = Drawing.new("Circle")
+    unlockButton.Filled      = false
+    unlockButton.NumSides    = 32
+    unlockButton.Radius      = 45          -- tap area
+    unlockButton.Thickness   = 4
+    unlockButton.Color       = Color3.fromRGB(255,0,0)
+    unlockButton.Visible     = false
+
+    -- Loops
+    RunService.Heartbeat:Connect(KeepTargetCentred)
+    RunService.RenderStepped:Connect(UpdateVisuals)
+    SetupInput()
 end
 
--- UI TOGGLE (MAIN AIMBOT)
+--=====================================================================
+--//  UI
+--=====================================================================
 SilentSection:Toggle({
-    Title = "Mobile Aimbot",
-    Desc = "Locks camera onto closest target in FOV (Mobile Optimized)",
-    Icon = "lucide:zap",
-    Type = "Checkbox",
+    Title = "Mobile Center-Lock",
+    Desc  = "Tap player → lock centre | Tap centre circle → unlock",
+    Icon  = "lucide:target",
     Default = false,
     Callback = function(state)
-        InitializeAimbot()
+        Init()
         aimbotEnabled = state
-        
-        if FOVCircle then 
-            FOVCircle.Visible = state and aimbotFeatures.FOVCircle 
+        if not state then
+            isLocked = false
+            lockedTarget = nil
         end
-        
         WindUI:Notify({
-            Title = "Mobile Aimbot",
-            Content = state and "🔒 Camera Lock Enabled" or "Camera Free",
-            Duration = 2,
-            Icon = state and "lucide:lock" or "lucide:unlock"
+            Title = "Mobile Center-Lock",
+            Content = state and "Tap a player to lock!" or "Disabled",
+            Duration = 3,
+            Icon = state and "lucide:zap" or "lucide:circle-x"
         }, true)
     end
 })
 
--- Features Dropdown
 SilentSection:Dropdown({
     Title = "Features",
-    Desc = "",
-    Values = {"Team Check", "Visible Check", "Prediction", "FOV Circle"},
-    Value = {"Team Check", "Prediction", "FOV Circle"},
-    Multi = true,
-    AllowNone = false,
-    Callback = function(selected)
-        InitializeAimbot()
+    Values = {"Team Check","Visible Check","Prediction","FOV Circle"},
+    Value  = {"Team Check","Prediction","FOV Circle"},
+    Multi  = true,
+    Callback = function(sel)
+        Init()
         for k in pairs(aimbotFeatures) do aimbotFeatures[k] = false end
-        for _, v in ipairs(selected) do
-            if v == "Team Check" then aimbotFeatures.TeamCheck = true
-            elseif v == "Visible Check" then aimbotFeatures.VisibleCheck = true
-            elseif v == "Prediction" then aimbotFeatures.Prediction = true
-            elseif v == "FOV Circle" then aimbotFeatures.FOVCircle = true end
+        for _,v in ipairs(sel) do
+            if v=="Team Check"     then aimbotFeatures.TeamCheck     = true
+            elseif v=="Visible Check" then aimbotFeatures.VisibleCheck = true
+            elseif v=="Prediction" then aimbotFeatures.Prediction   = true
+            elseif v=="FOV Circle" then aimbotFeatures.FOVCircle    = true end
         end
     end
 })
 
--- FOV Slider
 SilentSection:Slider({
-    Title = "FOV Radius",
-    Desc = "Detection radius around touch/mouse",
-    Value = { Min = 50, Max = 500, Default = aimbotFOVRadius },
-    Step = 5,
-    Callback = function(value)
-        InitializeAimbot()
-        aimbotFOVRadius = value
-        if FOVCircle then FOVCircle.Radius = value end
+    Title = "Tap Radius",
+    Desc  = "How close your finger must be",
+    Value = {Min=60, Max=250, Default=aimbotFOVRadius},
+    Step  = 10,
+    Callback = function(v)
+        aimbotFOVRadius = v
+        if FOVCircle then FOVCircle.Radius = v end
     end
 })
 
--- Prediction Slider
 SilentSection:Slider({
     Title = "Prediction",
-    Desc = "Lead moving targets",
-    Value = { Min = 0, Max = 0.5, Default = aimbotPredictionStrength },
-    Step = 0.01,
-    Callback = function(value)
-        aimbotPredictionStrength = value
-    end
+    Value = {Min=0, Max=0.5, Default=aimbotPrediction},
+    Step  = 0.01,
+    Callback = function(v) aimbotPrediction = v end
 })
 
--- NEW: Smoothness Slider (Mobile Essential)
 SilentSection:Slider({
     Title = "Smoothness",
-    Desc = "0.1 = Snappy | 0.3 = Smooth (Mobile)",
-    Value = { Min = 0.05, Max = 0.5, Default = aimbotSmoothness },
-    Step = 0.01,
-    Callback = function(value)
-        aimbotSmoothness = value
-    end
+    Desc  = "0.1 = snappy, 0.3 = smooth",
+    Value = {Min=0.08, Max=0.4, Default=aimbotSmoothness},
+    Step  = 0.01,
+    Callback = function(v) aimbotSmoothness = v end
 })
 
 local ESPSection = AimbotTab:Section({Title = "ESP", Icon = "users", Box = true, Opened = false})
